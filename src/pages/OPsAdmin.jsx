@@ -7,7 +7,7 @@ import { SelectButton } from "primereact/selectbutton";
 import { Tag } from "primereact/tag";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { useApp } from "../context/AppContext.jsx";
-import { formatDate } from "../utils/helpers.js";
+import { formatDate, calcularTotaisFormula } from "../utils/helpers.js";
 
 const FILTROS = ["Todas", "Aberta", "Em Andamento", "Encerrada", "Concluída"];
 
@@ -50,52 +50,102 @@ export default function OPsAdmin() {
 
       {opsFiltradas.length === 0 && <div className="empty-state">Nenhuma OP encontrada.</div>}
 
-      {opsFiltradas.map((op) => (
-        <div key={op.id} className="op-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
-                <span className="op-code">{op.op}</span>
-                <StatusBadge status={op.status} />
-                <Tag value={op.tipo} style={{ background: "#e6f1fb", color: "#185fa5" }} />
+      {opsFiltradas.map((op) => {
+        const itensEspecificos = op.itens.filter((it) => it.modo === "Específico");
+        const totaisEspecificos = calcularTotaisFormula(itensEspecificos, op.numeroBateladas);
+        const totalGeral = op.itens.reduce((sum, it) => sum + (Number(it.qtdBatelada) || 0) * op.numeroBateladas, 0);
+        const bateladasConcluidas = op.bateladasConcluidas || 0;
+
+        return (
+          <div key={op.id} className="op-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+                  <span className="op-code">{op.op}</span>
+                  <StatusBadge status={op.status} />
+                  <Tag value={op.tipo} style={{ background: "#e6f1fb", color: "#185fa5" }} />
+                  <Tag
+                    value={`Batelada ${bateladasConcluidas}/${op.numeroBateladas}`}
+                    style={{
+                      background: bateladasConcluidas >= op.numeroBateladas ? "#eaf3de" : "#fae8da",
+                      color: bateladasConcluidas >= op.numeroBateladas ? "#3b6d11" : "#854f0b",
+                    }}
+                  />
+                </div>
+
+                <div style={{ fontWeight: 600, fontSize: 15, color: "#1b3a5c" }}>{op.nome}</div>
+                {op.descricao && <div style={{ fontSize: 13, color: "#888" }}>{op.descricao}</div>}
+
+                <div style={{ display: "flex", gap: 16, marginTop: 8, marginBottom: 8, fontSize: 13 }}>
+                  <span>
+                    <b>Total da fórmula:</b> {totalGeral.toLocaleString("pt-BR")}
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: 8 }}>
+                  {op.itens.map((it, i) => {
+                    let label, unidade;
+                    if (it.modo === "Específico") {
+                      const m = mp.find((x) => x.id === it.mpId);
+                      label = m?.codigoEspecifico || "?";
+                      unidade = m?.unidade || "";
+                    } else {
+                      label = it.codigoComum;
+                      unidade = mp.find((m) => m.codigoComum === it.codigoComum)?.unidade || "";
+                    }
+                    const total = (Number(it.qtdBatelada) || 0) * op.numeroBateladas;
+                    return (
+                      <span key={i} className="op-item-pill">
+                        <Tag
+                          value={it.modo}
+                          style={{
+                            background: it.modo === "Específico" ? "#fae8da" : "#e1ecfb",
+                            color: it.modo === "Específico" ? "#854f0b" : "#185fa5",
+                            fontSize: 10,
+                            marginRight: 4,
+                          }}
+                        />
+                        {label}: <b>{it.qtdBatelada}</b>/batelada → <b>{total} {unidade}</b> total
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {op.apontamentos?.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 4 }}>
+                      Apontamentos ({op.apontamentos.length}):
+                    </div>
+                    {op.apontamentos.map((a, i) => (
+                      <div key={i} className="apontamento-item">
+                        <b>{a.operador}</b> em {formatDate(a.horario)} — Batelada {a.batelada}/{op.numeroBateladas}: {a.obs}
+                        {a.baixas?.length > 0 && (
+                          <div style={{ marginTop: 2, color: "#854f0b" }}>
+                            Baixa: {a.baixas.map((b) => `${b.codigoEspecifico} (${b.qtd} ${b.unidade})`).join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <div style={{ fontWeight: 600, fontSize: 15, color: "#1b3a5c" }}>{op.nome}</div>
-              {op.descricao && <div style={{ fontSize: 13, color: "#888" }}>{op.descricao}</div>}
-              {op.qtdProduzida != null && (
-                <div style={{ fontSize: 13, color: "#3b6d11", marginTop: 4 }}>
-                  <i className="pi pi-check-circle" style={{ marginRight: 4 }} />
-                  Produzido: <b>{op.qtdProduzida} kg</b>
-                </div>
-              )}
-
-              {op.apontamentos?.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#555", marginBottom: 4 }}>Apontamentos:</div>
-                  {op.apontamentos.map((a, i) => (
-                    <div key={i} className="apontamento-item">
-                      <b>{a.operador}</b> em {formatDate(a.horario)}: {a.obs} {a.qtd ? `— ${a.qtd} kg produzidos` : ""}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div style={{ display: "flex", gap: 8, marginLeft: 16 }}>
+                {(op.status === "Encerrada" || op.status === "Em Andamento") && (
+                  <Button icon="pi pi-pencil" label="Editar" size="small" severity="secondary" outlined onClick={() => openEdit(op)} />
+                )}
+                {op.status === "Encerrada" && (
+                  <Button icon="pi pi-check" label="Concluir" size="small" severity="success" onClick={() => concluir(op)} />
+                )}
+              </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginLeft: 16 }}>
-              {(op.status === "Encerrada" || op.status === "Em Andamento") && (
-                <Button icon="pi pi-pencil" label="Editar" size="small" severity="secondary" outlined onClick={() => openEdit(op)} />
-              )}
-              {op.status === "Encerrada" && (
-                <Button icon="pi pi-check" label="Concluir" size="small" severity="success" onClick={() => concluir(op)} />
-              )}
+            <div style={{ fontSize: 12, color: "#aaa", marginTop: 10 }}>
+              Criado em {formatDate(op.criadoEm)} por {op.criadoPor}
             </div>
           </div>
-
-          <div style={{ fontSize: 12, color: "#aaa", marginTop: 10 }}>
-            Criado em {formatDate(op.criadoEm)} por {op.criadoPor}
-          </div>
-        </div>
-      ))}
+        );
+      })}
 
       <Dialog
         header={editingOP ? `Editar OP: ${editingOP.op}` : ""}

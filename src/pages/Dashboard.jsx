@@ -54,6 +54,10 @@ export default function Dashboard() {
           <DataTable value={ultimasOps} size="small" stripedRows>
             <Column field="op" header="OP" body={(r) => <span className="op-code">{r.op}</span>} />
             <Column field="tipo" header="Tipo" />
+            <Column
+              header="Bateladas"
+              body={(r) => `${r.bateladasConcluidas || 0}/${r.numeroBateladas}`}
+            />
             <Column field="criadoPor" header="Responsável" />
             <Column field="status" header="Status" body={(r) => <StatusBadge status={r.status} />} />
             <Column field="criadoEm" header="Data" body={(r) => formatDateShort(r.criadoEm)} />
