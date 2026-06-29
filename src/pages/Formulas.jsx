@@ -8,26 +8,40 @@ import { Dropdown } from "primereact/dropdown";
 import { SelectButton } from "primereact/selectbutton";
 import { Message } from "primereact/message";
 import { Tag } from "primereact/tag";
+import { Checkbox } from "primereact/checkbox";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { useApp } from "../context/AppContext.jsx";
 import { formatDate, validarOP, opJaExiste, calcularTotaisFormula, listarCodigosComuns } from "../utils/helpers.js";
+import { UNIDADES } from "../utils/data.js";
 
 const EMPTY_ITEM = () => ({ modo: "Específico", mpId: null, codigoComum: null, qtdBatelada: null });
+const EMPTY_PRODUTO_GERADO = () => ({
+  ativo: false,
+  codigoComum: "",
+  descricaoComum: "",
+  codigoEspecifico: "",
+  descricaoEspecifica: "",
+  unidade: "kg",
+  local: "",
+});
 
 export default function Formulas({ tipo }) {
-  const { mp, setMp, ops, setOps, movs, setMovs, showToast, user } = useApp();
+  const { mp, setMp, ops, setOps, showToast, user } = useApp();
   const [visible, setVisible] = useState(false);
   const [form, setForm] = useState({ op: "", nome: "", descricao: "", numeroBateladas: 1 });
   const [itens, setItens] = useState([EMPTY_ITEM()]);
+  const [produtoGerado, setProdutoGerado] = useState(EMPTY_PRODUTO_GERADO());
 
   const formulasDoTipo = ops.filter((o) => o.tipo === tipo);
   const mpOptions = mp.map((m) => ({ label: `${m.codigoEspecifico} — ${m.descricaoEspecifica}`, value: m.id }));
   const comuns = listarCodigosComuns(mp);
   const comunsOptions = comuns.map((c) => ({ label: `${c.codigoComum} — ${c.descricaoComum}`, value: c.codigoComum }));
+  const ehExtrusao = tipo === "Extrusão";
 
   function abrirModal() {
     setForm({ op: "", nome: "", descricao: "", numeroBateladas: 1 });
     setItens([EMPTY_ITEM()]);
+    setProdutoGerado(EMPTY_PRODUTO_GERADO());
     setVisible(true);
   }
 
@@ -82,6 +96,20 @@ export default function Formulas({ tipo }) {
       return;
     }
 
+    let produtoGeradoId = null;
+
+    if (ehExtrusao && produtoGerado.ativo) {
+      if (!produtoGerado.codigoComum || !produtoGerado.descricaoComum || !produtoGerado.codigoEspecifico || !produtoGerado.descricaoEspecifica || !produtoGerado.local) {
+        showToast("error", "Erro", "Preencha todos os campos do produto gerado pela extrusão");
+        return;
+      }
+      const duplicado = mp.some((m) => m.codigoEspecifico === produtoGerado.codigoEspecifico);
+      if (duplicado) {
+        showToast("error", "Erro", "Já existe uma matéria-prima com este código específico");
+        return;
+      }
+    }
+
     const novaOP = {
       id: Date.now(),
       op: form.op.trim().toUpperCase(),
@@ -95,6 +123,7 @@ export default function Formulas({ tipo }) {
         codigoComum: i.modo === "Comum" ? i.codigoComum : null,
         qtdBatelada: i.qtdBatelada,
       })),
+      produtoGerado: ehExtrusao && produtoGerado.ativo ? { ...produtoGerado } : null,
       status: "Aberta",
       criadoPor: user.username,
       criadoEm: new Date().toISOString(),
@@ -102,66 +131,42 @@ export default function Formulas({ tipo }) {
       bateladasConcluidas: 0,
     };
 
+    // Se a fórmula de extrusão gera um produto intermediário, cadastra-o no estoque com saldo zero.
+    // O saldo passa a ser creditado pelo operador a cada apontamento de batelada.
+    if (ehExtrusao && produtoGerado.ativo) {
+      produtoGeradoId = Date.now() + 1;
+      setMp((prev) => [
+        ...prev,
+        {
+          id: produtoGeradoId,
+          tipo: "Produto Intermediário",
+          codigoComum: produtoGerado.codigoComum,
+          descricaoComum: produtoGerado.descricaoComum,
+          codigoEspecifico: produtoGerado.codigoEspecifico,
+          descricaoEspecifica: produtoGerado.descricaoEspecifica,
+          fornecedorId: null,
+          unidade: produtoGerado.unidade,
+          estoque: 0,
+          local: produtoGerado.local,
+          origem: "Extrusão",
+          opOrigem: novaOP.op,
+        },
+      ]);
+      novaOP.produtoGeradoMpId = produtoGeradoId;
+    }
+
     setOps((prev) => [...prev, novaOP]);
-    showToast("success", "OP criada", `OP ${novaOP.op} criada com sucesso!`);
+    showToast("success", "OP criada", `OP ${novaOP.op} criada com sucesso! Aguarde o operador iniciar a produção.`);
     setVisible(false);
   }
 
-  function baixarMP(op) {
-    // Baixa total da OP = quantidade por batelada x número de bateladas, sempre no código específico.
-    // Para itens definidos por código comum, o admin precisa escolher de qual fornecedor específico sairá no momento da baixa.
-    const itensComEspecifico = op.itens.filter((it) => it.modo === "Específico");
-    const itensComComum = op.itens.filter((it) => it.modo === "Comum");
-
-    if (itensComComum.length > 0) {
-      showToast(
-        "warn",
-        "Atenção",
-        "Esta fórmula possui itens por código comum. A baixa desses itens deve ser feita escolhendo o fornecedor específico na tela de Estoque."
-      );
-    }
-
-    const totais = calcularTotaisFormula(itensComEspecifico, op.numeroBateladas);
-
-    const problemas = totais
-      .map((it) => {
-        const m = mp.find((x) => x.id === it.mpId);
-        return m && m.estoque < it.qtdTotal
-          ? `${m.descricaoEspecifica}: necessário ${it.qtdTotal} ${m.unidade}, disponível ${m.estoque}`
-          : null;
-      })
-      .filter(Boolean);
-
-    if (problemas.length) {
-      showToast("error", "Estoque insuficiente", problemas.join("; "));
-      return;
-    }
-
-    setMp((prev) =>
-      prev.map((m) => {
-        const it = totais.find((i) => i.mpId === m.id);
-        return it ? { ...m, estoque: m.estoque - it.qtdTotal } : m;
-      })
-    );
-
-    setMovs((prev) => [
-      ...prev,
-      ...totais.map((it) => ({
-        id: Date.now() + it.mpId,
-        mpId: it.mpId,
-        tipo: "Saída",
-        qtd: it.qtdTotal,
-        data: new Date().toISOString(),
-        responsavel: user.username,
-        obs: `Baixa OP ${op.op} (${op.numeroBateladas} bateladas)`,
-      })),
-    ]);
-
+  // O admin apenas LIBERA/INICIA a OP para o operador. A baixa de matéria-prima é feita
+  // exclusivamente pelo operador, por batelada, na tela de apontamento.
+  function iniciarOP(op) {
     setOps((prev) =>
-      prev.map((o) => (o.id === op.id ? { ...o, status: "Em Andamento", baixaEm: new Date().toISOString() } : o))
+      prev.map((o) => (o.id === op.id ? { ...o, status: "Em Andamento", iniciadaEm: new Date().toISOString(), iniciadaPor: user.username } : o))
     );
-
-    showToast("success", "Baixa realizada", `Baixa de MP realizada para OP ${op.op}`);
+    showToast("success", "OP iniciada", `OP ${op.op} liberada para o operador iniciar o apontamento por batelada.`);
   }
 
   const tipoIcon = tipo === "Extrusão" ? "pi pi-cog" : "pi pi-blender";
@@ -178,10 +183,6 @@ export default function Formulas({ tipo }) {
       {formulasDoTipo.length === 0 && <div className="empty-state">Nenhuma fórmula de {tipo} criada ainda.</div>}
 
       {formulasDoTipo.map((op) => {
-        const totais = calcularTotaisFormula(
-          op.itens.filter((it) => it.modo === "Específico"),
-          op.numeroBateladas
-        );
         const totalGeral = op.itens.reduce((sum, it) => sum + (Number(it.qtdBatelada) || 0) * op.numeroBateladas, 0);
 
         return (
@@ -200,20 +201,25 @@ export default function Formulas({ tipo }) {
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <StatusBadge status={op.status} />
                 {op.status === "Aberta" && (
-                  <Button label="Baixar MP" icon="pi pi-arrow-down" severity="warning" size="small" onClick={() => baixarMP(op)} />
+                  <Button label="Iniciar OP" icon="pi pi-play" severity="success" size="small" onClick={() => iniciarOP(op)} />
                 )}
               </div>
             </div>
+
+            {op.produtoGerado && (
+              <Message
+                severity="info"
+                text={`Esta OP gera o produto intermediário: ${op.produtoGerado.codigoEspecifico} — ${op.produtoGerado.descricaoEspecifica} (disponível para uso na Mistura)`}
+                style={{ width: "100%", marginBottom: 10 }}
+              />
+            )}
 
             <div style={{ display: "flex", gap: 16, marginBottom: 10, fontSize: 13 }}>
               <span>
                 <b>Bateladas:</b> {op.numeroBateladas}
               </span>
               <span>
-                <b>Total da fórmula:</b> {totalGeral.toLocaleString("pt-BR")}{" "}
-                {op.itens[0]?.modo === "Específico"
-                  ? mp.find((m) => m.id === op.itens[0]?.mpId)?.unidade
-                  : comuns.find((c) => c.codigoComum === op.itens[0]?.codigoComum)?.unidade}
+                <b>Total da fórmula:</b> {totalGeral.toLocaleString("pt-BR")}
               </span>
             </div>
 
@@ -249,12 +255,13 @@ export default function Formulas({ tipo }) {
 
             <div style={{ fontSize: 12, color: "#aaa", marginTop: 10 }}>
               Criado em {formatDate(op.criadoEm)} por {op.criadoPor}
+              {op.iniciadaEm && ` • Iniciada em ${formatDate(op.iniciadaEm)} por ${op.iniciadaPor}`}
             </div>
           </div>
         );
       })}
 
-      <Dialog header={`Nova Fórmula de ${tipo}`} visible={visible} style={{ width: 640 }} onHide={() => setVisible(false)}>
+      <Dialog header={`Nova Fórmula de ${tipo}`} visible={visible} style={{ width: 660 }} onHide={() => setVisible(false)}>
         <Message
           severity="warn"
           text="O número da OP é gerado em outro sistema. Digite o número exato (11 caracteres) para vincular esta fórmula."
@@ -369,6 +376,87 @@ export default function Formulas({ tipo }) {
         })}
 
         <Button label="Adicionar Item" icon="pi pi-plus" size="small" outlined onClick={addItem} style={{ marginBottom: 16 }} />
+
+        {ehExtrusao && (
+          <div style={{ border: "1px solid #e1ecfb", background: "#f7faff", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <Checkbox
+                checked={produtoGerado.ativo}
+                onChange={(e) => setProdutoGerado((p) => ({ ...p, ativo: e.checked }))}
+              />
+              <span style={{ fontWeight: 600, fontSize: 14, color: "#185fa5" }}>
+                Esta fórmula de extrusão gera um produto intermediário para estoque (consumível na Mistura)
+              </span>
+            </div>
+
+            {produtoGerado.ativo && (
+              <>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <div className="field-block" style={{ flex: 1 }}>
+                    <label className="field-label">Código Comum do Produto</label>
+                    <InputText
+                      value={produtoGerado.codigoComum}
+                      onChange={(e) => setProdutoGerado((p) => ({ ...p, codigoComum: e.target.value }))}
+                      placeholder="Ex: COMP-PP-EXT"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                  <div className="field-block" style={{ flex: 1 }}>
+                    <label className="field-label">Código Específico do Produto</label>
+                    <InputText
+                      value={produtoGerado.codigoEspecifico}
+                      onChange={(e) => setProdutoGerado((p) => ({ ...p, codigoEspecifico: e.target.value }))}
+                      placeholder="Ex: COMP-PP-EXT-L1"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+                <div className="field-block">
+                  <label className="field-label">Descrição Comum</label>
+                  <InputText
+                    value={produtoGerado.descricaoComum}
+                    onChange={(e) => setProdutoGerado((p) => ({ ...p, descricaoComum: e.target.value }))}
+                    placeholder="Ex: Composto PP Extrudado"
+                    style={{ width: "100%" }}
+                  />
+                </div>
+                <div className="field-block">
+                  <label className="field-label">Descrição Específica</label>
+                  <InputText
+                    value={produtoGerado.descricaoEspecifica}
+                    onChange={(e) => setProdutoGerado((p) => ({ ...p, descricaoEspecifica: e.target.value }))}
+                    placeholder="Ex: Composto PP Extrudado - Linha 1"
+                    style={{ width: "100%" }}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <div className="field-block" style={{ flex: 1 }}>
+                    <label className="field-label">Unidade</label>
+                    <Dropdown
+                      value={produtoGerado.unidade}
+                      options={UNIDADES}
+                      onChange={(e) => setProdutoGerado((p) => ({ ...p, unidade: e.value }))}
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                  <div className="field-block" style={{ flex: 1 }}>
+                    <label className="field-label">Local de Armazenamento</label>
+                    <InputText
+                      value={produtoGerado.local}
+                      onChange={(e) => setProdutoGerado((p) => ({ ...p, local: e.target.value }))}
+                      placeholder="Ex: Pátio de Extrudados"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: "#555" }}>
+                  O produto será cadastrado em Matérias-Primas com estoque inicial zero. O estoque será creditado
+                  automaticamente a cada apontamento de batelada do operador.
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <Button label="Cancelar" severity="secondary" outlined onClick={() => setVisible(false)} />

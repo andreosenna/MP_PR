@@ -7,7 +7,7 @@ import { SelectButton } from "primereact/selectbutton";
 import { Tag } from "primereact/tag";
 import StatusBadge from "../components/StatusBadge.jsx";
 import { useApp } from "../context/AppContext.jsx";
-import { formatDate, calcularTotaisFormula } from "../utils/helpers.js";
+import { formatDate } from "../utils/helpers.js";
 
 const FILTROS = ["Todas", "Aberta", "Em Andamento", "Encerrada", "Concluída"];
 
@@ -51,8 +51,6 @@ export default function OPsAdmin() {
       {opsFiltradas.length === 0 && <div className="empty-state">Nenhuma OP encontrada.</div>}
 
       {opsFiltradas.map((op) => {
-        const itensEspecificos = op.itens.filter((it) => it.modo === "Específico");
-        const totaisEspecificos = calcularTotaisFormula(itensEspecificos, op.numeroBateladas);
         const totalGeral = op.itens.reduce((sum, it) => sum + (Number(it.qtdBatelada) || 0) * op.numeroBateladas, 0);
         const bateladasConcluidas = op.bateladasConcluidas || 0;
 
@@ -81,6 +79,13 @@ export default function OPsAdmin() {
                     <b>Total da fórmula:</b> {totalGeral.toLocaleString("pt-BR")}
                   </span>
                 </div>
+
+                {op.produtoGerado && (
+                  <div style={{ fontSize: 12, background: "#f7faff", border: "1px solid #e1ecfb", borderRadius: 8, padding: "6px 10px", marginBottom: 8, color: "#185fa5" }}>
+                    <i className="pi pi-box" style={{ marginRight: 4 }} />
+                    Gera produto intermediário: <b>{op.produtoGerado.codigoEspecifico}</b> — {op.produtoGerado.descricaoEspecifica}
+                  </div>
+                )}
 
                 <div style={{ marginBottom: 8 }}>
                   {op.itens.map((it, i) => {
@@ -122,6 +127,11 @@ export default function OPsAdmin() {
                         {a.baixas?.length > 0 && (
                           <div style={{ marginTop: 2, color: "#854f0b" }}>
                             Baixa: {a.baixas.map((b) => `${b.codigoEspecifico} (${b.qtd} ${b.unidade})`).join(", ")}
+                          </div>
+                        )}
+                        {a.credito && (
+                          <div style={{ marginTop: 2, color: "#185fa5" }}>
+                            Crédito: {a.credito.codigoEspecifico} (+{a.credito.qtd} {a.credito.unidade})
                           </div>
                         )}
                       </div>

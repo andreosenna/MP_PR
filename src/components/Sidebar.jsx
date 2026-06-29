@@ -4,7 +4,9 @@ import { Button } from "primereact/button";
 const ADMIN_NAV = [
   { id: "dashboard", label: "Dashboard", icon: "pi pi-chart-bar" },
   { id: "materias-primas", label: "Matérias-Primas", icon: "pi pi-box" },
+  { id: "fornecedores", label: "Fornecedores", icon: "pi pi-truck" },
   { id: "estoque", label: "Movimentação Estoque", icon: "pi pi-sync" },
+  { id: "relatorio-inspecao", label: "Relatório de Inspeção", icon: "pi pi-chart-line" },
   { id: "formulas-extrusao", label: "Fórmulas Extrusão", icon: "pi pi-cog" },
   { id: "formulas-mistura", label: "Fórmulas Mistura", icon: "pi pi-blender" },
   { id: "ops-admin", label: "Ordens de Produção", icon: "pi pi-list-check" },

@@ -16,18 +16,23 @@ const EMPTY_FORM = {
   descricaoComum: "",
   codigoEspecifico: "",
   descricaoEspecifica: "",
-  fornecedor: "",
+  fornecedorId: null,
   unidade: "kg",
   local: "",
 };
 
 export default function MateriasPrimas() {
-  const { mp, setMp, showToast, user } = useApp();
+  const { mp, setMp, fornecedores, showToast, user } = useApp();
   const [dialogMode, setDialogMode] = useState(null); // "add" | "edit" | null
   const [form, setForm] = useState(EMPTY_FORM);
 
   // Sugestões de código comum já cadastrados, para reaproveitar entre fornecedores diferentes
   const codigosComunsExistentes = [...new Map(mp.map((m) => [m.codigoComum, m])).values()];
+  const fornecedorOptions = fornecedores.map((f) => ({ label: f.nome, value: f.id }));
+
+  function nomeFornecedor(fornecedorId) {
+    return fornecedores.find((f) => f.id === fornecedorId)?.nome || "-";
+  }
 
   function openAdd() {
     setForm(EMPTY_FORM);
@@ -55,8 +60,8 @@ export default function MateriasPrimas() {
   }
 
   function save() {
-    if (!form.tipo || !form.codigoComum || !form.descricaoComum || !form.codigoEspecifico || !form.descricaoEspecifica || !form.local) {
-      showToast("error", "Erro", "Preencha todos os campos obrigatórios");
+    if (!form.tipo || !form.codigoComum || !form.descricaoComum || !form.codigoEspecifico || !form.descricaoEspecifica || !form.fornecedorId || !form.local) {
+      showToast("error", "Erro", "Preencha todos os campos obrigatórios, incluindo o fornecedor");
       return;
     }
 
@@ -67,10 +72,10 @@ export default function MateriasPrimas() {
     }
 
     if (dialogMode === "add") {
-      setMp((prev) => [...prev, { ...form, id: Date.now(), estoque: 0 }]);
+      setMp((prev) => [...prev, { ...form, id: Date.now(), estoque: 0, origem: "Compra" }]);
       showToast("success", "Sucesso", "Matéria-prima cadastrada!");
     } else {
-      setMp((prev) => prev.map((m) => (m.id === form.id ? { ...form } : m)));
+      setMp((prev) => prev.map((m) => (m.id === form.id ? { ...m, ...form } : m)));
       showToast("success", "Sucesso", "Matéria-prima atualizada!");
     }
     setDialogMode(null);
@@ -102,7 +107,20 @@ export default function MateriasPrimas() {
             body={(r) => <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#854f0b" }}>{r.codigoEspecifico}</span>}
           />
           <Column field="descricaoEspecifica" header="Descrição Específica" />
-          <Column field="fornecedor" header="Fornecedor" />
+          <Column
+            header="Fornecedor"
+            body={(r) => (r.fornecedorId ? nomeFornecedor(r.fornecedorId) : <span style={{ color: "#aaa" }}>Interno</span>)}
+          />
+          <Column
+            field="origem"
+            header="Origem"
+            body={(r) => (
+              <Tag
+                value={r.origem || "Compra"}
+                style={{ background: r.origem === "Extrusão" ? "#e1ecfb" : "#f0f4f8", color: r.origem === "Extrusão" ? "#185fa5" : "#555" }}
+              />
+            )}
+          />
           <Column
             field="estoque"
             header="Estoque (específico)"
@@ -189,11 +207,13 @@ export default function MateriasPrimas() {
         <div style={{ display: "flex", gap: 12 }}>
           <div className="field-block" style={{ flex: 1 }}>
             <label className="field-label">Fornecedor</label>
-            <InputText
-              value={form.fornecedor}
-              onChange={(e) => setForm((f) => ({ ...f, fornecedor: e.target.value }))}
-              placeholder="Ex: Braskem"
+            <Dropdown
+              value={form.fornecedorId}
+              options={fornecedorOptions}
+              onChange={(e) => setForm((f) => ({ ...f, fornecedorId: e.value }))}
+              placeholder="Selecione..."
               style={{ width: "100%" }}
+              filter
             />
           </div>
           <div className="field-block" style={{ flex: 1 }}>

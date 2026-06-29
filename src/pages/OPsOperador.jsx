@@ -10,12 +10,17 @@ import { useApp } from "../context/AppContext.jsx";
 import { formatDate } from "../utils/helpers.js";
 
 export default function OPsOperador() {
-  const { ops, setOps, mp, setMp, movs, setMovs, user, showToast } = useApp();
+  const { ops, setOps, mp, setMp, movs, setMovs, fornecedores, user, showToast } = useApp();
   const [apontandoOP, setApontandoOP] = useState(null);
   const [escolhaEspecifico, setEscolhaEspecifico] = useState({}); // { itemIdx: mpId } para itens "Comum"
   const [obs, setObs] = useState("");
 
   const opsDisponiveis = ops.filter((o) => o.status === "Em Andamento" || o.status === "Encerrada");
+
+  function nomeFornecedor(mpId) {
+    const item = mp.find((m) => m.id === mpId);
+    return fornecedores.find((f) => f.id === item?.fornecedorId)?.nome || "Interno";
+  }
 
   function abrirApontamento(op) {
     setObs("");
@@ -34,7 +39,7 @@ export default function OPsOperador() {
   function opcoesEspecificoPara(codigoComum) {
     return mp
       .filter((m) => m.codigoComum === codigoComum)
-      .map((m) => ({ label: `${m.codigoEspecifico} — ${m.fornecedor} (Estoque: ${m.estoque} ${m.unidade})`, value: m.id }));
+      .map((m) => ({ label: `${m.codigoEspecifico} — ${nomeFornecedor(m.id)} (Estoque: ${m.estoque} ${m.unidade})`, value: m.id }));
   }
 
   function registrarApontamento() {
@@ -74,11 +79,20 @@ export default function OPsOperador() {
       return;
     }
 
-    // Debita o estoque do código específico de cada item, referente a esta batelada
+    // Se esta OP (de Extrusão) gera um produto intermediário, a batelada também credita
+    // a quantidade total da fórmula (soma dos itens) no estoque do produto gerado.
+    const credito = op.produtoGerado && op.produtoGeradoMpId
+      ? { mpId: op.produtoGeradoMpId, qtd: op.itens.reduce((sum, it) => sum + (Number(it.qtdBatelada) || 0), 0) }
+      : null;
+
+    // Debita o estoque do código específico de cada item, referente a esta batelada,
+    // e credita o produto gerado (se houver).
     setMp((prev) =>
       prev.map((m) => {
         const b = baixas.find((x) => x.mpId === m.id);
-        return b ? { ...m, estoque: m.estoque - b.qtd } : m;
+        if (b) return { ...m, estoque: m.estoque - b.qtd };
+        if (credito && m.id === credito.mpId) return { ...m, estoque: m.estoque + credito.qtd };
+        return m;
       })
     );
 
@@ -93,6 +107,19 @@ export default function OPsOperador() {
         responsavel: user.username,
         obs: `Apontamento OP ${op.op} — Batelada ${bateladaAtual}/${op.numeroBateladas}`,
       })),
+      ...(credito
+        ? [
+            {
+              id: Date.now() + 999,
+              mpId: credito.mpId,
+              tipo: "Entrada",
+              qtd: credito.qtd,
+              data: new Date().toISOString(),
+              responsavel: user.username,
+              obs: `Produto gerado pela extrusão — OP ${op.op} — Batelada ${bateladaAtual}/${op.numeroBateladas}`,
+            },
+          ]
+        : []),
     ]);
 
     const novoApontamento = {
@@ -104,6 +131,12 @@ export default function OPsOperador() {
         const m = mp.find((x) => x.id === b.mpId);
         return { mpId: b.mpId, codigoEspecifico: m?.codigoEspecifico, qtd: b.qtd, unidade: m?.unidade };
       }),
+      credito: credito
+        ? (() => {
+            const m = mp.find((x) => x.id === credito.mpId);
+            return { codigoEspecifico: m?.codigoEspecifico, qtd: credito.qtd, unidade: m?.unidade };
+          })()
+        : null,
     };
 
     setOps((prev) =>
@@ -118,7 +151,11 @@ export default function OPsOperador() {
       )
     );
 
-    showToast("success", "Sucesso", `Batelada ${bateladaAtual}/${op.numeroBateladas} apontada e MP debitada!`);
+    showToast(
+      "success",
+      "Sucesso",
+      `Batelada ${bateladaAtual}/${op.numeroBateladas} apontada, MP debitada${credito ? " e produto gerado creditado" : ""}!`
+    );
     setApontandoOP(null);
   }
 
@@ -139,7 +176,7 @@ export default function OPsOperador() {
         <div className="empty-state">
           <i className="pi pi-clipboard" style={{ fontSize: 36, marginBottom: 12, display: "block" }} />
           <div>Nenhuma OP disponível para apontamento no momento.</div>
-          <div style={{ fontSize: 13, marginTop: 8 }}>Aguarde o administrador criar e liberar as OPs.</div>
+          <div style={{ fontSize: 13, marginTop: 8 }}>Aguarde o administrador criar e iniciar as OPs.</div>
         </div>
       )}
 
@@ -165,6 +202,14 @@ export default function OPsOperador() {
 
                 <div style={{ fontWeight: 600, fontSize: 16, color: "#1b3a5c", marginBottom: 4 }}>{op.nome}</div>
                 {op.descricao && <div style={{ fontSize: 13, color: "#888", marginBottom: 8 }}>{op.descricao}</div>}
+
+                {op.produtoGerado && (
+                  <Message
+                    severity="info"
+                    text={`Cada batelada concluída credita ${op.produtoGerado.codigoEspecifico} — ${op.produtoGerado.descricaoEspecifica} no estoque.`}
+                    style={{ width: "100%", marginBottom: 10 }}
+                  />
+                )}
 
                 <div style={{ marginBottom: 10 }}>
                   {op.itens.map((it, i) => {
@@ -208,6 +253,11 @@ export default function OPsOperador() {
                         {a.baixas?.length > 0 && (
                           <div style={{ marginTop: 4, color: "#854f0b" }}>
                             Baixa: {a.baixas.map((b) => `${b.codigoEspecifico} (${b.qtd} ${b.unidade})`).join(", ")}
+                          </div>
+                        )}
+                        {a.credito && (
+                          <div style={{ marginTop: 2, color: "#185fa5" }}>
+                            Crédito: {a.credito.codigoEspecifico} (+{a.credito.qtd} {a.credito.unidade})
                           </div>
                         )}
                       </div>
@@ -297,6 +347,21 @@ export default function OPsOperador() {
             }
           })}
 
+        {apontandoOP?.produtoGerado && (
+          <div style={{ border: "1px solid #e1ecfb", background: "#f7faff", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+            <div style={{ fontSize: 13 }}>
+              <Tag value="Crédito" style={{ background: "#e1f5ee", color: "#085041", fontSize: 10, marginRight: 6 }} />
+              <b>{apontandoOP.produtoGerado.codigoEspecifico}</b> — {apontandoOP.produtoGerado.descricaoEspecifica}
+            </div>
+            <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+              Será creditado no estoque:{" "}
+              <b>
+                {apontandoOP.itens.reduce((sum, it) => sum + (Number(it.qtdBatelada) || 0), 0)} {apontandoOP.produtoGerado.unidade}
+              </b>
+            </div>
+          </div>
+        )}
+
         <div className="field-block" style={{ marginTop: 12 }}>
           <label className="field-label">Observações *</label>
           <InputTextarea
@@ -310,7 +375,7 @@ export default function OPsOperador() {
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <Button label="Cancelar" severity="secondary" outlined onClick={() => setApontandoOP(null)} />
-          <Button label="Registrar e Debitar MP" onClick={registrarApontamento} />
+          <Button label="Registrar Apontamento" onClick={registrarApontamento} />
         </div>
       </Dialog>
     </div>

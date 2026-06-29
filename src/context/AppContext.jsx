@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useRef } from "react";
 import { Toast } from "primereact/toast";
-import { USERS, INITIAL_MP, INITIAL_MOVS, INITIAL_OPS } from "../utils/data.js";
+import { USERS, INITIAL_MP, INITIAL_MOVS, INITIAL_OPS, INITIAL_FORNECEDORES } from "../utils/data.js";
 
 const AppContext = createContext(null);
 
@@ -9,6 +9,7 @@ export function AppProvider({ children }) {
   const [mp, setMp] = useState(INITIAL_MP);
   const [movs, setMovs] = useState(INITIAL_MOVS);
   const [ops, setOps] = useState(INITIAL_OPS);
+  const [fornecedores, setFornecedores] = useState(INITIAL_FORNECEDORES);
   const toastRef = useRef(null);
 
   function login(username, password) {
@@ -38,6 +39,8 @@ export function AppProvider({ children }) {
     setMovs,
     ops,
     setOps,
+    fornecedores,
+    setFornecedores,
     showToast,
   };
 
